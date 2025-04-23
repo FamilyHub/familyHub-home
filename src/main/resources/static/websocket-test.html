@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #messages {
+            height: 300px;
+            border: 1px solid #ccc;
+            margin: 20px 0;
+            padding: 10px;
+            overflow-y: auto;
+        }
+        #messageInput {
+            width: 70%;
+            padding: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Test</h1>
+    <div id="messages"></div>
+    <input type="text" id="messageInput" placeholder="Type your message here...">
+    <button onclick="sendMessage()">Send</button>
+
+    <script>
+        const ws = new WebSocket('ws://localhost:8080/ws');
+        const messagesDiv = document.getElementById('messages');
+        const messageInput = document.getElementById('messageInput');
+
+        ws.onopen = () => {
+            addMessage('System: Connected to WebSocket server');
+        };
+
+        ws.onmessage = (event) => {
+            addMessage('Server: ' + event.data);
+        };
+
+        ws.onerror = (error) => {
+            addMessage('Error: ' + error.message);
+        };
+
+        ws.onclose = () => {
+            addMessage('System: Connection closed');
+        };
+
+        function sendMessage() {
+            const message = messageInput.value;
+            if (message) {
+                ws.send(message);
+                addMessage('You: ' + message);
+                messageInput.value = '';
+            }
+        }
+
+        function addMessage(message) {
+            const messageElement = document.createElement('div');
+            messageElement.textContent = message;
+            messagesDiv.appendChild(messageElement);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        // Send message on Enter key
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html> 
