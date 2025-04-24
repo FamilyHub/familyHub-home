@@ -4,6 +4,7 @@ import com.example.FamilyHub.dto.ChatMessageDTO;
 import com.example.FamilyHub.models.ChatMessage;
 import com.example.FamilyHub.repository.ChatMessageRepository;
 import com.example.FamilyHub.service.ChatService;
+import com.example.FamilyHub.service.SessionManager;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -22,14 +23,17 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequiredArgsConstructor
 public class ChatServiceImpl implements ChatService {
     private static final Logger logger = LoggerFactory.getLogger(ChatServiceImpl.class);
+    private static final String OFFLINE_MESSAGES_KEY = "offline:messages:";
+    private static final String OFFLINE_MESSAGE_PATTERN = "offline:messages:*";
 
     private final ChatMessageRepository chatMessageRepository;
     private final ReactiveRedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
     private final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
+    private final SessionManager sessionManager;
 
     @Override
-    public Mono<ChatMessage> sendMessage(ChatMessageDTO messageDTO) {
+    public Mono<Void> sendMessage(ChatMessageDTO messageDTO) {
         logger.debug("Processing message: {}", messageDTO);
         
         // Create and save message
@@ -41,39 +45,55 @@ public class ChatServiceImpl implements ChatService {
         message.setTimestamp(LocalDateTime.now());
 
         return chatMessageRepository.save(message)
-            .doOnSuccess(savedMessage -> {
+            .flatMap(savedMessage -> {
                 logger.debug("Message saved to MongoDB: {}", savedMessage);
                 
-                // Publish to Redis
-                redisTemplate.convertAndSend("chat", savedMessage.getId())
-                    .doOnSuccess(v -> logger.debug("Message published to Redis: {}", savedMessage.getId()))
-                    .subscribe();
-
-                // Send via WebSocket if receiver is connected
-                WebSocketSession receiverSession = sessions.get(savedMessage.getReceiverId());
-                if (receiverSession != null) {
+                // Check if receiver is online
+                if (sessionManager.isUserOnline(messageDTO.getReceiverId())) {
+                    // If online, send directly through WebSocket
+                    WebSocketSession receiverSession = sessionManager.getSession(messageDTO.getReceiverId());
+                    if (receiverSession != null && receiverSession.isOpen()) {
+                        try {
+                            String messageJson = objectMapper.writeValueAsString(convertToDTO(savedMessage));
+                            return receiverSession.send(Mono.just(receiverSession.textMessage(messageJson)))
+                                .doOnSuccess(v -> {
+                                    logger.debug("Message sent directly via WebSocket to: {}", messageDTO.getReceiverId());
+                                    // Mark message as delivered
+                                    savedMessage.setStatus(ChatMessage.MessageStatus.DELIVERED);
+                                    savedMessage.setDeliveredAt(LocalDateTime.now());
+                                    chatMessageRepository.save(savedMessage).subscribe();
+                                });
+                        } catch (Exception e) {
+                            logger.error("Error sending direct WebSocket message: {}", e.getMessage());
+                            return Mono.empty();
+                        }
+                    }
+                } else {
+                    // If offline, store in Redis for later delivery
+                    String offlineKey = OFFLINE_MESSAGES_KEY + messageDTO.getReceiverId();
                     try {
-                        String messageJson = objectMapper.writeValueAsString(savedMessage);
-                        receiverSession.send(Mono.just(receiverSession.textMessage(messageJson)))
-                            .doOnSuccess(v -> logger.debug("Message sent via WebSocket to: {}", savedMessage.getReceiverId()))
-                            .doOnError(e -> logger.error("Error sending WebSocket message: {}", e.getMessage()))
-                            .subscribe();
+                        String messageJson = objectMapper.writeValueAsString(convertToDTO(savedMessage));
+                        return redisTemplate.opsForList().rightPush(offlineKey, messageJson)
+                            .doOnSuccess(v -> logger.debug("Message stored in Redis for offline user: {}", messageDTO.getReceiverId()));
                     } catch (Exception e) {
-                        logger.error("Error serializing message: {}", e.getMessage());
+                        logger.error("Error storing offline message: {}", e.getMessage());
+                        return Mono.empty();
                     }
                 }
+                return Mono.empty();
             })
-            .doOnError(e -> logger.error("Error processing message: {}", e.getMessage()));
+            .then();
     }
 
     @Override
-    public Flux<ChatMessage> getChatHistory(String senderId, String receiverId) {
+    public Mono<ChatMessage> getChatHistory(String senderId, String receiverId) {
         logger.debug("Getting chat history between {} and {}", senderId, receiverId);
         return chatMessageRepository.findBySenderIdAndReceiverIdOrReceiverIdAndSenderId(
             senderId, receiverId, senderId, receiverId
         )
         .doOnNext(message -> logger.debug("Found message: {}", message))
-        .sort((m1, m2) -> m1.getTimestamp().compareTo(m2.getTimestamp()));
+        .sort((m1, m2) -> m1.getTimestamp().compareTo(m2.getTimestamp()))
+        .next();
     }
 
     @Override
@@ -137,5 +157,58 @@ public class ChatServiceImpl implements ChatService {
     public void removeSession(String userId) {
         sessions.remove(userId);
         logger.debug("Removed WebSocket session for user: {}", userId);
+    }
+
+    @Override
+    public Mono<Void> deliverOfflineMessages(String userId) {
+        logger.debug("Delivering offline messages for user: {}", userId);
+        String offlineKey = OFFLINE_MESSAGES_KEY + userId;
+        
+        return redisTemplate.opsForList().size(offlineKey)
+            .flatMap(size -> {
+                if (size > 0) {
+                    logger.debug("Found {} offline messages for user: {}", size, userId);
+                    return redisTemplate.opsForList().leftPop(offlineKey)
+                        .flatMap(messageJson -> {
+                            try {
+                                ChatMessageDTO messageDTO = objectMapper.readValue(messageJson, ChatMessageDTO.class);
+                                WebSocketSession session = sessionManager.getSession(userId);
+                                
+                                if (session != null && session.isOpen()) {
+                                    return session.send(Mono.just(session.textMessage(messageJson)))
+                                        .doOnSuccess(v -> {
+                                            logger.debug("Offline message delivered to: {}", userId);
+                                            // Mark message as delivered in MongoDB
+                                            chatMessageRepository.findById(messageDTO.getId())
+                                                .flatMap(message -> {
+                                                    message.setStatus(ChatMessage.MessageStatus.DELIVERED);
+                                                    message.setDeliveredAt(LocalDateTime.now());
+                                                    return chatMessageRepository.save(message);
+                                                })
+                                                .subscribe();
+                                        });
+                                }
+                                return Mono.empty();
+                            } catch (Exception e) {
+                                logger.error("Error processing offline message: {}", e.getMessage());
+                                return Mono.empty();
+                            }
+                        })
+                        .repeat(size - 1)
+                        .then();
+                }
+                return Mono.empty();
+            });
+    }
+
+    private ChatMessageDTO convertToDTO(ChatMessage message) {
+        ChatMessageDTO dto = new ChatMessageDTO();
+        dto.setId(message.getId());
+        dto.setSenderId(message.getSenderId());
+        dto.setReceiverId(message.getReceiverId());
+        dto.setContent(message.getContent());
+        dto.setTimestamp(message.getTimestamp());
+        dto.setStatus(message.getStatus());
+        return dto;
     }
 } 

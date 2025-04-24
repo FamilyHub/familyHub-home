@@ -41,7 +41,6 @@ public class ChatController {
 
     @GetMapping
     public Mono<Void> handleWebSocket(WebSocketSession session) {
-        // Get user ID from session (you might need to implement this)
         String userId = getUserIdFromSession(session);
         sessions.put(userId, session);
         

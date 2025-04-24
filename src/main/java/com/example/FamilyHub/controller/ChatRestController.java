@@ -36,31 +36,28 @@ public class ChatRestController {
      * Send a chat message
      * Path: POST /api/chat/send
      */
-    @PostMapping("/send")
-    public Mono<ResponseEntity<ChatMessage>> sendMessage(
-            @RequestBody ChatMessageDTO messageDTO,
-            Authentication authentication) {
-        logger.debug("Received send message request from user: {}", authentication.getName());
-        String senderId = authentication.getName();
-        messageDTO.setSenderId(senderId);
-        messageDTO.setTimestamp(java.time.LocalDateTime.now());
-        return chatService.sendMessage(messageDTO)
-                .map(ResponseEntity::ok)
-                .doOnSuccess(response -> logger.debug("Message sent successfully"))
-                .doOnError(error -> logger.error("Error sending message: {}", error.getMessage()));
-    }
+//    @PostMapping("/send")
+//    public Mono<Void> sendMessage(
+//            @RequestBody ChatMessageDTO messageDTO,
+//            Authentication authentication) {
+//        logger.debug("Received send message request from user: {}", authentication.getName());
+//        String senderId = authentication.getName();
+//        messageDTO.setSenderId(senderId);
+//        messageDTO.setTimestamp(java.time.LocalDateTime.now());
+//         chatService.sendMessage(messageDTO);
+//    }
 
     /**
      * Get chat history with a specific user
      * Path: GET /api/chat/history/{receiverId}
      */
-    @GetMapping("/history/{receiverId}")
-    public Flux<ChatMessage> getChatHistory(
-            @PathVariable String receiverId,
-            Authentication authentication) {
-        String senderId = authentication.getName();
-        return chatService.getChatHistory(senderId, receiverId);
-    }
+//    @GetMapping("/history/{receiverId}")
+//    public Flux<ChatMessage> getChatHistory(
+//            @PathVariable String receiverId,
+//            Authentication authentication) {
+//        String senderId = authentication.getName();
+//        return chatService.getChatHistory(senderId, receiverId);
+//    }
 
     /**
      * Get count of unread messages

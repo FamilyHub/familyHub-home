@@ -2,7 +2,9 @@ package com.example.FamilyHub.config;
 
 import com.example.FamilyHub.dto.ChatMessageDTO;
 import com.example.FamilyHub.service.ChatService;
+import com.example.FamilyHub.service.impl.RedisMessageListener;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.FamilyHub.service.SessionManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.reactive.config.WebFluxConfigurer;
@@ -13,6 +15,8 @@ import org.springframework.web.reactive.HandlerMapping;
 import org.springframework.web.reactive.handler.SimpleUrlHandlerMapping;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.*;
@@ -50,11 +54,16 @@ public class WebSocketConfig implements WebFluxConfigurer {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ChatService chatService;
+    private final RedisMessageListener redisMessageListener;
     private final Map<String, WebSocketSession> userSessions = new ConcurrentHashMap<>();
     private final Sinks.Many<ChatMessageDTO> messageSink = Sinks.many().multicast().onBackpressureBuffer();
+    private final SessionManager sessionManager;
+    private static final Logger logger = LoggerFactory.getLogger(WebSocketConfig.class);
 
-    public WebSocketConfig(ChatService chatService) {
+    public WebSocketConfig(ChatService chatService, RedisMessageListener redisMessageListener, SessionManager sessionManager) {
         this.chatService = chatService;
+        this.redisMessageListener = redisMessageListener;
+        this.sessionManager = sessionManager;
     }
 
     @Bean
@@ -77,12 +86,18 @@ public class WebSocketConfig implements WebFluxConfigurer {
     @Bean
     public WebSocketHandler webSocketHandler() {
         return session -> {
-            // Extract user ID from the session (you might need to adjust this based on your auth setup)
-            String userId = extractUserIdFromSession(session);
-            if (userId != null) {
-                userSessions.put(userId, session);
-                System.out.println("User connected: " + userId);
+            // Extract userId from headers
+            String userId = session.getHandshakeInfo().getHeaders().getFirst("X-User-ID");
+            if (userId == null) {
+                logger.error("No user ID found in WebSocket headers");
+                return session.close();
             }
+            
+            // Add session to manager
+            sessionManager.addSession(userId, session);
+            
+            // Deliver offline messages when user comes online
+            chatService.deliverOfflineMessages(userId).subscribe();
 
             return session.receive()
                 .doOnNext(message -> {
@@ -96,29 +111,17 @@ public class WebSocketConfig implements WebFluxConfigurer {
                         
                         // Save message to database
                         chatService.sendMessage(chatMessage).subscribe();
-                        
-                        // Send to recipient if online
-                        WebSocketSession recipientSession = userSessions.get(chatMessage.getReceiverId());
-                        if (recipientSession != null) {
-                            recipientSession.send(Mono.just(recipientSession.textMessage(payload))).subscribe();
-                        }
                     } catch (Exception e) {
-                        System.err.println("Error processing message: " + e.getMessage());
+                        logger.error("Error processing message: {}", e.getMessage());
                     }
                 })
                 .doFinally(signalType -> {
-                    if (userId != null) {
-                        userSessions.remove(userId);
-                        System.out.println("User disconnected: " + userId);
-                    }
+                    sessionManager.removeSession(userId);
                 })
                 .then();
         };
     }
-
-    private String extractUserIdFromSession(WebSocketSession session) {
-        // Extract user ID from the session attributes or headers
-        // This is just an example - adjust based on your auth setup
-        return session.getHandshakeInfo().getHeaders().getFirst("userId");
-    }
 } 
+
+
+

@@ -43,10 +43,10 @@ public class JwtAuthenticationFilter implements WebFilter {
         String path = exchange.getRequest().getPath().value();
         
         // Skip JWT validation for public paths
-        if (isPublicPath(path)) {
-            logger.debug("Skipping JWT validation for public path: {}", path);
-            return chain.filter(exchange);
-        }
+//        if (isPublicPath(path)) {
+//            logger.debug("Skipping JWT validation for public path: {}", path);
+//            return chain.filter(exchange);
+//        }
 
         String token = extractToken(exchange);
         if (token == null) {

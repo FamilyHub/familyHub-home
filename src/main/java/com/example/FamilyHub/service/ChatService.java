@@ -6,8 +6,9 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 public interface ChatService {
-    Mono<ChatMessage> sendMessage(ChatMessageDTO messageDTO);
-    Flux<ChatMessage> getChatHistory(String senderId, String receiverId);
+    Mono<Void> sendMessage(ChatMessageDTO message);
+    Mono<Void> deliverOfflineMessages(String userId);
+    Mono<ChatMessage> getChatHistory(String senderId, String receiverId);
     Mono<Void> markMessageAsDelivered(String messageId);
     Mono<Void> markMessageAsRead(String messageId);
     Mono<Long> getUnreadMessageCount(String userId);
