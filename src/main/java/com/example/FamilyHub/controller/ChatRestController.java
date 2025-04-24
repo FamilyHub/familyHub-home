@@ -1,5 +1,6 @@
 package com.example.FamilyHub.controller;
 
+import com.example.FamilyHub.dto.ChatHistoryResponse;
 import com.example.FamilyHub.dto.ChatMessageDTO;
 import com.example.FamilyHub.models.ChatMessage;
 import com.example.FamilyHub.service.ChatService;
@@ -11,6 +12,9 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
+import com.example.FamilyHub.security.JwtTokenProvider;
 
 /**
  * REST Chat Controller
@@ -31,6 +35,7 @@ import reactor.core.publisher.Mono;
 public class ChatRestController {
     private static final Logger logger = LoggerFactory.getLogger(ChatRestController.class);
     private final ChatService chatService;
+    private final JwtTokenProvider jwtTokenProvider;
 
     /**
      * Send a chat message
@@ -106,5 +111,22 @@ public class ChatRestController {
         String userId = authentication.getName();
         return chatService.markMessageAsDelivered(messageId)
                 .then(Mono.just(ResponseEntity.ok().build()));
+    }
+
+    @GetMapping("/history")
+    public Mono<ChatHistoryResponse> getChatHistory(
+        @RequestParam(required = false) String cursor,
+        @RequestParam(defaultValue = "50") int limit,
+        @RequestParam String otherUserId,
+        @RequestHeader("Authorization") String token
+    ) {
+        String userId = jwtTokenProvider.getUserIdFromToken(token);
+        if (userId == null) {
+            logger.error("Invalid or missing token");
+            return Mono.error(new RuntimeException("Invalid or missing token"));
+        }
+        
+        logger.debug("Fetching chat history for user: {}", userId);
+        return chatService.getChatHistory(userId, otherUserId, cursor, limit);
     }
 } 

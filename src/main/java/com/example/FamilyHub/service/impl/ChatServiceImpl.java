@@ -1,5 +1,6 @@
 package com.example.FamilyHub.service.impl;
 
+import com.example.FamilyHub.dto.ChatHistoryResponse;
 import com.example.FamilyHub.dto.ChatMessageDTO;
 import com.example.FamilyHub.models.ChatMessage;
 import com.example.FamilyHub.repository.ChatMessageRepository;
@@ -14,10 +15,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.List;
+import java.util.Collections;
+import java.util.stream.Collectors;
+import java.time.Duration;
 
 @Service
 @RequiredArgsConstructor
@@ -199,6 +205,61 @@ public class ChatServiceImpl implements ChatService {
                 }
                 return Mono.empty();
             });
+    }
+
+    @Override
+    public Mono<ChatHistoryResponse> getChatHistory(String userId, String otherUserId, String cursor, int limit) {
+        logger.debug("Fetching chat history for sender: {} and receiver: {} with cursor {}", userId, otherUserId, cursor);
+        
+        // Check Redis cache first
+        String cacheKey = String.format("chat:history:%s:%s:%s", userId, otherUserId, cursor);
+        return redisTemplate.opsForValue().get(cacheKey)
+            .flatMap(cachedData -> {
+                if (cachedData != null) {
+                    logger.debug("Cache hit for chat history");
+                    try {
+                        return Mono.just(objectMapper.readValue(cachedData, ChatHistoryResponse.class));
+                    } catch (Exception e) {
+                        logger.error("Error parsing cached data: {}", e.getMessage());
+                        return Mono.empty();
+                    }
+                }
+                return Mono.empty();
+            })
+            .switchIfEmpty(Mono.defer(() -> {
+                // If not in cache, fetch from database
+                return chatMessageRepository.findBySenderAndReceiver(
+                    userId,
+                    otherUserId,
+                    cursor,
+                    PageRequest.of(0, limit, Sort.by(Sort.Direction.DESC, "timestamp"))
+                )
+                .collectList()
+                .flatMap(messages -> {
+                    ChatHistoryResponse response = new ChatHistoryResponse();
+                    
+                    // Convert to DTOs and reverse order (oldest first)
+                    List<ChatMessageDTO> messageDTOs = messages.stream()
+                        .map(this::convertToDTO)
+                        .collect(Collectors.toList());
+                    Collections.reverse(messageDTOs);
+                    
+                    response.setMessages(messageDTOs);
+                    response.setNextCursor(messages.isEmpty() ? null : messages.get(0).getId());
+                    response.setHasMore(messages.size() == limit);
+                    
+                    // Cache the response
+                    try {
+                        String responseJson = objectMapper.writeValueAsString(response);
+                        return redisTemplate.opsForValue()
+                            .set(cacheKey, responseJson, Duration.ofHours(1))
+                            .thenReturn(response);
+                    } catch (Exception e) {
+                        logger.error("Error caching chat history: {}", e.getMessage());
+                        return Mono.just(response);
+                    }
+                });
+            }));
     }
 
     private ChatMessageDTO convertToDTO(ChatMessage message) {
