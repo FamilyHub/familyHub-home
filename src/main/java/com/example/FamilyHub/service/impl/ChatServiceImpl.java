@@ -2,6 +2,7 @@ package com.example.FamilyHub.service.impl;
 
 import com.example.FamilyHub.dto.ChatHistoryResponse;
 import com.example.FamilyHub.dto.ChatMessageDTO;
+import com.example.FamilyHub.dto.EnhancedChatHistoryResponse;
 import com.example.FamilyHub.models.ChatMessage;
 import com.example.FamilyHub.repository.ChatMessageRepository;
 import com.example.FamilyHub.service.ChatService;
@@ -24,6 +25,7 @@ import java.util.List;
 import java.util.Collections;
 import java.util.stream.Collectors;
 import java.time.Duration;
+import org.springframework.data.domain.Pageable;
 
 @Service
 @RequiredArgsConstructor
@@ -209,57 +211,87 @@ public class ChatServiceImpl implements ChatService {
 
     @Override
     public Mono<ChatHistoryResponse> getChatHistory(String userId, String otherUserId, String cursor, int limit) {
-        logger.debug("Fetching chat history for sender: {} and receiver: {} with cursor {}", userId, otherUserId, cursor);
+        logger.debug("Fetching chat history for user: {} with other user: {}", userId, otherUserId);
         
-        // Check Redis cache first
-        String cacheKey = String.format("chat:history:%s:%s:%s", userId, otherUserId, cursor);
-        return redisTemplate.opsForValue().get(cacheKey)
-            .flatMap(cachedData -> {
-                if (cachedData != null) {
-                    logger.debug("Cache hit for chat history");
-                    try {
-                        return Mono.just(objectMapper.readValue(cachedData, ChatHistoryResponse.class));
-                    } catch (Exception e) {
-                        logger.error("Error parsing cached data: {}", e.getMessage());
-                        return Mono.empty();
-                    }
-                }
-                return Mono.empty();
-            })
-            .switchIfEmpty(Mono.defer(() -> {
-                // If not in cache, fetch from database
-                return chatMessageRepository.findBySenderAndReceiver(
-                    userId,
-                    otherUserId,
-                    cursor,
-                    PageRequest.of(0, limit, Sort.by(Sort.Direction.DESC, "timestamp"))
-                )
-                .collectList()
-                .flatMap(messages -> {
-                    ChatHistoryResponse response = new ChatHistoryResponse();
-                    
-                    // Convert to DTOs and reverse order (oldest first)
-                    List<ChatMessageDTO> messageDTOs = messages.stream()
-                        .map(this::convertToDTO)
-                        .collect(Collectors.toList());
-                    Collections.reverse(messageDTOs);
-                    
-                    response.setMessages(messageDTOs);
-                    response.setNextCursor(messages.isEmpty() ? null : messages.get(0).getId());
+        LocalDateTime beforeTimestamp = cursor != null ? 
+            LocalDateTime.parse(cursor) : LocalDateTime.now();
+        
+        return chatMessageRepository.findByUsersAndTimestamp(
+                userId,
+                otherUserId,
+                beforeTimestamp,
+                PageRequest.of(0, limit, Sort.by(Sort.Direction.DESC, "timestamp"))
+            )
+            .collectList()
+            .flatMap(messages -> {
+                // Convert to DTOs and sort by timestamp (oldest first)
+                List<ChatMessageDTO> messageDTOs = messages.stream()
+                    .map(this::convertToDTO)
+                    .sorted((m1, m2) -> m1.getTimestamp().compareTo(m2.getTimestamp()))
+                    .collect(Collectors.toList());
+                
+                ChatHistoryResponse response = new ChatHistoryResponse();
+                response.setMessages(messageDTOs);
+                
+                // Set next cursor if there are messages
+                if (!messages.isEmpty()) {
+                    response.setNextCursor(messages.get(messages.size() - 1).getTimestamp().toString());
                     response.setHasMore(messages.size() == limit);
-                    
-                    // Cache the response
-                    try {
-                        String responseJson = objectMapper.writeValueAsString(response);
-                        return redisTemplate.opsForValue()
-                            .set(cacheKey, responseJson, Duration.ofHours(1))
-                            .thenReturn(response);
-                    } catch (Exception e) {
-                        logger.error("Error caching chat history: {}", e.getMessage());
-                        return Mono.just(response);
-                    }
+                } else {
+                    response.setNextCursor(null);
+                    response.setHasMore(false);
+                }
+                
+                return Mono.just(response);
+            });
+    }
+
+    @Override
+    public Mono<EnhancedChatHistoryResponse> getEnhancedChatHistory(
+        String userId,
+        String otherUserId,
+        LocalDateTime beforeTimestamp,
+        LocalDateTime afterTimestamp,
+        int limit
+    ) {
+        logger.debug("Getting enhanced chat history between {} and {} with timestamps: before={}, after={}",
+            userId, otherUserId, beforeTimestamp, afterTimestamp);
+
+        // Create pageable with limit and sort by timestamp descending
+        Pageable pageable = PageRequest.of(0, limit, Sort.by(Sort.Direction.DESC, "timestamp"));
+
+        return chatMessageRepository.findByUsersAndTimestamps(userId, otherUserId, beforeTimestamp, afterTimestamp, pageable)
+            .collectList()
+            .flatMap(messages -> {
+                if (messages.isEmpty()) {
+                    return Mono.just(new EnhancedChatHistoryResponse());
+                }
+
+                // Sort messages by timestamp ascending for response
+                messages.sort((m1, m2) -> m1.getTimestamp().compareTo(m2.getTimestamp()));
+
+                // Get the oldest and newest timestamps from the current batch
+                LocalDateTime oldestTimestamp = messages.get(0).getTimestamp();
+                LocalDateTime newestTimestamp = messages.get(messages.size() - 1).getTimestamp();
+
+                // Check if there are more messages before and after
+                return Mono.zip(
+                    chatMessageRepository.existsMessagesBefore(userId, otherUserId, oldestTimestamp),
+                    chatMessageRepository.existsMessagesAfter(userId, otherUserId, newestTimestamp),
+                    chatMessageRepository.countByUsers(userId, otherUserId)
+                ).map(tuple -> {
+                    EnhancedChatHistoryResponse response = new EnhancedChatHistoryResponse();
+                    response.setMessages(messages.stream()
+                        .map(this::convertToDTO)
+                        .collect(Collectors.toList()));
+                    response.setNextCursor(oldestTimestamp.toString()); // THE VALUE IS THE END OF THE PREVIOUS MESSAGES
+                    response.setPreviousCursor(newestTimestamp.toString()); // THE START OF THE NEXT MESSAGES
+                    response.setHasMore(tuple.getT1()); // previous messages
+                    response.setHasPrevious(tuple.getT2()); // next messages
+                    response.setTotalMessages(tuple.getT3());
+                    return response;
                 });
-            }));
+            });
     }
 
     private ChatMessageDTO convertToDTO(ChatMessage message) {

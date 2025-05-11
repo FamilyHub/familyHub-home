@@ -94,15 +94,14 @@ public class JwtTokenProvider {
             if (StringUtils.hasText(token) && token.startsWith("Bearer ")) {
                 token = token.substring(7);
             }
-            
             Claims claims = Jwts.parser()
                 .setSigningKey(jwtSecret)
                 .parseClaimsJws(token)
                 .getBody();
                 
-            return claims.getSubject();
+            return claims.get("userId", String.class);
         } catch (Exception e) {
-            logger.error("Error extracting userId from token: {}", e.getMessage());
+            logger.error("Error parsing JWT token: {}", e.getMessage());
             return null;
         }
     }

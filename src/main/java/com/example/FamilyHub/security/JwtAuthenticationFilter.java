@@ -6,6 +6,7 @@ import io.jsonwebtoken.UnsupportedJwtException;
 import io.jsonwebtoken.security.SignatureException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContext;
@@ -27,7 +28,8 @@ public class JwtAuthenticationFilter implements WebFilter {
             "/api/auth/register",
             "/api/auth/refresh-token",
             "/ws",
-            "/ws/info"
+            "/ws/info",
+            "api/chat/**"
     );
 
     private final JwtTokenProvider tokenProvider;
@@ -40,13 +42,19 @@ public class JwtAuthenticationFilter implements WebFilter {
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
+        // Skip JWT validation for OPTIONS requests
+        if (exchange.getRequest().getMethod() == HttpMethod.OPTIONS) {
+            logger.debug("Skipping JWT validation for OPTIONS request");
+            return chain.filter(exchange);
+        }
+
         String path = exchange.getRequest().getPath().value();
         
         // Skip JWT validation for public paths
-//        if (isPublicPath(path)) {
-//            logger.debug("Skipping JWT validation for public path: {}", path);
-//            return chain.filter(exchange);
-//        }
+        if (isPublicPath(path)) {
+            logger.debug("Skipping JWT validation for public path: {}", path);
+            return chain.filter(exchange);
+        }
 
         String token = extractToken(exchange);
         if (token == null) {

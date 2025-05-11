@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.SecurityWebFiltersOrder;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
@@ -44,6 +45,7 @@ public class SecurityConfig {
                 .authorizeExchange(exchanges -> {
                     logger.debug("Configuring authorization rules");
                     exchanges
+                        .pathMatchers(HttpMethod.OPTIONS, "/**").permitAll() // Allow all OPTIONS requests
                         .pathMatchers("/ws/**", "/ws", "/api/auth/**").permitAll()
                         .anyExchange().authenticated();
                 })

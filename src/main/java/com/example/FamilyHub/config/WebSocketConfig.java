@@ -21,6 +21,7 @@ import org.slf4j.LoggerFactory;
 import java.util.Map;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * WebSocket Configuration Class
@@ -87,7 +88,17 @@ public class WebSocketConfig implements WebFluxConfigurer {
     public WebSocketHandler webSocketHandler() {
         return session -> {
             // Extract userId from headers
-            String userId = session.getHandshakeInfo().getHeaders().getFirst("X-User-ID");
+//           String userId = session.getHandshakeInfo().getHeaders().getFirst("X-User-ID");
+
+            String userId = null;
+            String query = session.getHandshakeInfo().getUri().getQuery();
+            if (query != null) {
+                Map<String, String> queryParams = Arrays.stream(query.split("&"))
+                        .map(param -> param.split("="))
+                        .filter(param -> param.length == 2)
+                        .collect(Collectors.toMap(param -> param[0], param -> param[1]));
+                userId = queryParams.get("userId");
+            }
             if (userId == null) {
                 logger.error("No user ID found in WebSocket headers");
                 return session.close();
@@ -99,14 +110,19 @@ public class WebSocketConfig implements WebFluxConfigurer {
             // Deliver offline messages when user comes online
             chatService.deliverOfflineMessages(userId).subscribe();
 
+            String finalUserId = userId;
             return session.receive()
                 .doOnNext(message -> {
+
+
+
+
                     try {
                         String payload = message.getPayloadAsText();
                         ChatMessageDTO chatMessage = objectMapper.readValue(payload, ChatMessageDTO.class);
-                        
+
                         // Set sender ID from the session
-                        chatMessage.setSenderId(userId);
+                        chatMessage.setSenderId(finalUserId);
                         chatMessage.setTimestamp(java.time.LocalDateTime.now());
                         
                         // Save message to database
@@ -116,12 +132,12 @@ public class WebSocketConfig implements WebFluxConfigurer {
                     }
                 })
                 .doFinally(signalType -> {
-                    sessionManager.removeSession(userId);
+                    sessionManager.removeSession(finalUserId);
                 })
                 .then();
         };
     }
-} 
+}
 
 
 
