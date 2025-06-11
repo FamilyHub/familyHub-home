@@ -137,6 +137,11 @@ public class WebSocketConfig implements WebFluxConfigurer {
                 .then();
         };
     }
+
+    public SessionManager NoOfConnectedUsers() {
+
+        return sessionManager;
+    }
 }
 
 

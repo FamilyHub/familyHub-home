@@ -1,10 +1,12 @@
 package com.example.FamilyHub.controller;
 
+import com.example.FamilyHub.config.WebSocketConfig;
 import com.example.FamilyHub.dto.ChatHistoryResponse;
 import com.example.FamilyHub.dto.ChatMessageDTO;
 import com.example.FamilyHub.dto.EnhancedChatHistoryResponse;
 import com.example.FamilyHub.models.ChatMessage;
 import com.example.FamilyHub.service.ChatService;
+import com.example.FamilyHub.service.SessionManager;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,6 +42,7 @@ public class ChatRestController {
     private static final Logger logger = LoggerFactory.getLogger(ChatRestController.class);
     private final ChatService chatService;
     private final JwtTokenProvider jwtTokenProvider;
+    private final WebSocketConfig webSocketConfig;
 
     /**
      * Send a chat message
@@ -146,7 +149,6 @@ public class ChatRestController {
      * @param beforeTimestamp Messages before this timestamp (for older messages)
      * @param afterTimestamp Messages after this timestamp (for newer messages)
      * @param limit Maximum number of messages to return (default: 20)
-     * @param authentication The authentication object containing the current user's details
      * @return EnhancedChatHistoryResponse containing messages and pagination info
      */
     @GetMapping("/enhanced-history/{receiverId}")
@@ -208,75 +210,9 @@ public class ChatRestController {
                 return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build());
             });
     }
-}
 
-
-
-/*
-// Initial load when chat is opened
-const loadInitialMessages = async () => {
-    try {
-        const response = await fetch('/api/chat/enhanced-history/user123?limit=20', {
-            headers: {
-                'Authorization': 'Bearer YOUR_JWT_TOKEN'
-            }
-        });
-        const data = await response.json();
-
-        if (data.messages.length > 0) {
-            // Display the messages
-            displayMessages(data.messages);
-
-            // Store cursors for pagination
-            const { nextCursor, previousCursor, hasMore, hasPrevious } = data;
-
-            // Set up scroll handlers
-            setupScrollHandlers(nextCursor, previousCursor, hasMore, hasPrevious);
-        } else {
-            // Show "No messages yet" UI
-            showEmptyState();
-        }
-    } catch (error) {
-        console.error('Error loading messages:', error);
-        showErrorState();
+    @GetMapping("/sessions")
+    public SessionManager connectedUsers() {
+        return webSocketConfig.NoOfConnectedUsers();
     }
-};
-
-// Function to handle scrolling up (loading older messages)
-const loadOlderMessages = async (nextCursor) => {
-    const response = await fetch(
-        `/api/chat/enhanced-history/user123?beforeTimestamp=${nextCursor}&limit=20`,
-        {
-            headers: {
-                'Authorization': 'Bearer YOUR_JWT_TOKEN'
-            }
-        }
-    );
-    const data = await response.json();
-
-    // Prepend older messages to the chat
-    prependMessages(data.messages);
-
-    // Update pagination info
-    updatePaginationInfo(data);
-};
-
-// Function to handle scrolling down (loading newer messages)
-const loadNewerMessages = async (previousCursor) => {
-    const response = await fetch(
-        `/api/chat/enhanced-history/user123?afterTimestamp=${previousCursor}&limit=20`,
-        {
-            headers: {
-                'Authorization': 'Bearer YOUR_JWT_TOKEN'
-            }
-        }
-    );
-    const data = await response.json();
-
-    // Append newer messages to the chat
-    appendMessages(data.messages);
-
-    // Update pagination info
-    updatePaginationInfo(data);
-};
- */
+}
