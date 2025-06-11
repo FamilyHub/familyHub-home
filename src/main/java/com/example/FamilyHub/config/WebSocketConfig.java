@@ -2,7 +2,6 @@ package com.example.FamilyHub.config;
 
 import com.example.FamilyHub.dto.ChatMessageDTO;
 import com.example.FamilyHub.service.ChatService;
-import com.example.FamilyHub.service.impl.RedisMessageListener;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.example.FamilyHub.service.SessionManager;
 import org.springframework.context.annotation.Bean;
@@ -55,21 +54,18 @@ public class WebSocketConfig implements WebFluxConfigurer {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ChatService chatService;
-    private final RedisMessageListener redisMessageListener;
     private final Map<String, WebSocketSession> userSessions = new ConcurrentHashMap<>();
     private final Sinks.Many<ChatMessageDTO> messageSink = Sinks.many().multicast().onBackpressureBuffer();
     private final SessionManager sessionManager;
     private static final Logger logger = LoggerFactory.getLogger(WebSocketConfig.class);
 
-    public WebSocketConfig(ChatService chatService, RedisMessageListener redisMessageListener, SessionManager sessionManager) {
+    public WebSocketConfig(ChatService chatService, SessionManager sessionManager) {
         this.chatService = chatService;
-        this.redisMessageListener = redisMessageListener;
         this.sessionManager = sessionManager;
     }
 
     @Bean
     public HandlerMapping handlerMapping() {
-
         Map<String, WebSocketHandler> map = new HashMap<>();
         map.put("/ws", webSocketHandler());
 
@@ -87,9 +83,6 @@ public class WebSocketConfig implements WebFluxConfigurer {
     @Bean
     public WebSocketHandler webSocketHandler() {
         return session -> {
-            // Extract userId from headers
-//           String userId = session.getHandshakeInfo().getHeaders().getFirst("X-User-ID");
-
             String userId = null;
             String query = session.getHandshakeInfo().getUri().getQuery();
             if (query != null) {
@@ -113,10 +106,6 @@ public class WebSocketConfig implements WebFluxConfigurer {
             String finalUserId = userId;
             return session.receive()
                 .doOnNext(message -> {
-
-
-
-
                     try {
                         String payload = message.getPayloadAsText();
                         ChatMessageDTO chatMessage = objectMapper.readValue(payload, ChatMessageDTO.class);
@@ -139,7 +128,6 @@ public class WebSocketConfig implements WebFluxConfigurer {
     }
 
     public SessionManager NoOfConnectedUsers() {
-
         return sessionManager;
     }
 }

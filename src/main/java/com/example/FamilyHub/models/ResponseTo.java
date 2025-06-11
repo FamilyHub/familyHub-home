@@ -1,4 +1,4 @@
-package com.example.FamilyHub.model;
+package com.example.FamilyHub.models;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;

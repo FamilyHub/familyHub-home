@@ -1,6 +1,6 @@
 package com.example.FamilyHub.client;
 
-import com.example.FamilyHub.model.ResponseTo;
+import com.example.FamilyHub.models.ResponseTo;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;

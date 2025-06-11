@@ -1,7 +1,7 @@
 package com.example.FamilyHub.service.impl;
 
 import com.example.FamilyHub.client.ExpenseTrackerClient;
-import com.example.FamilyHub.model.ResponseTo;
+import com.example.FamilyHub.models.ResponseTo;
 import com.example.FamilyHub.service.ExpenseAnalysisService;
 import org.springframework.stereotype.Service;
 

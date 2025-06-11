@@ -1,6 +1,6 @@
 package com.example.FamilyHub.controller;
 
-import com.example.FamilyHub.model.ResponseTo;
+import com.example.FamilyHub.models.ResponseTo;
 import com.example.FamilyHub.service.ExpenseAnalysisService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
